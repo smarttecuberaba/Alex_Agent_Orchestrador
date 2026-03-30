@@ -20,7 +20,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copiar codigo do agente
-COPY agente_2w/ ./agente_2w/
+# COPY agente_2w/ ./agente_2w/
 COPY api/ ./api/
 
 # Usuario nao-root para seguranca
