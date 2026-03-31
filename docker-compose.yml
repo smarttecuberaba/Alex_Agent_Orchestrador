@@ -1,29 +1,14 @@
-# ─────────────────────────────────────────────────────────────
-# Agente 2W Pneus — docker-compose para Coolify
-# No Coolify: apontar para este arquivo no repositorio
-# Variaveis de ambiente configuradas pelo painel do Coolify
-# ─────────────────────────────────────────────────────────────
-version: "3.9"
-
 services:
   agente-2w:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    build: .
+    container_name: agente-2w-pneus
     restart: unless-stopped
     ports:
-      - "${PORT:-8000}:8000"
+      - "8000:8000"
+    env_file:
+      - .env
     environment:
-      - SUPABASE_URL=${SUPABASE_URL}
-      - SUPABASE_KEY=${SUPABASE_KEY}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o}
-      - CHATWOOT_URL=${CHATWOOT_URL:-https://chatwoot.smarttecsolutions.com.br}
-      - CHATWOOT_API_TOKEN=${CHATWOOT_API_TOKEN}
-      - CHATWOOT_ACCOUNT_ID=${CHATWOOT_ACCOUNT_ID:-1}
-      - WEBHOOK_SECRET=${WEBHOOK_SECRET}
-      - PORT=${PORT:-8000}
-      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - LOG_LEVEL=INFO
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
