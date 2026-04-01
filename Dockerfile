@@ -16,7 +16,7 @@ COPY agente_2w/ ./agente_2w/
 COPY webhook.py .
 
 # Porta padrão
-EXPOSE 8000
+EXPOSE 5001
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
