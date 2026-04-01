@@ -4,7 +4,7 @@ services:
     container_name: agente-2w-pneus
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "5001:5001"
     env_file:
       - .env
     environment:
