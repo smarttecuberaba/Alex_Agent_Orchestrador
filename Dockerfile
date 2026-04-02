@@ -13,6 +13,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copiar código da aplicação
 COPY agente_2w/ ./agente_2w/
+COPY api/ ./api/
 COPY webhook.py .
 
 # Porta padrão
