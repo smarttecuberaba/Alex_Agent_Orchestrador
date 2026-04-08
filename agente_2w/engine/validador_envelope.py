@@ -2,6 +2,7 @@ from agente_2w.schemas.envelope_ia import EnvelopeIA
 from agente_2w.schemas.contexto_executavel import ContextoExecutavel
 from agente_2w.engine.pendencias import acoes_permitidas
 from agente_2w.engine.maquina_estados import transicao_permitida
+from agente_2w.constantes import ChaveContexto
 
 
 def validar_envelope(
@@ -76,7 +77,53 @@ def validar_envelope(
     if envelope.confianca not in ("alta", "media", "baixa"):
         erros.append(f"confianca '{envelope.confianca}' invalida")
 
-    # 7. Mensagem para o cliente nao pode ser vazia
+    # 7. entrega_pagamento -> fechamento exige tipo_entrega e forma_pagamento registrados
+    # Considera fatos ja no banco OU sendo registrados neste mesmo turno (fatos_observados/inferidos)
+    from agente_2w.enums.enums import EtapaFluxo
+    if (
+        contexto.sessao.etapa_atual == EtapaFluxo.entrega_pagamento
+        and envelope.etapa_atual == EtapaFluxo.fechamento
+    ):
+        chaves_fatos = {f.chave for f in contexto.fatos_ativos}
+        chaves_fatos |= {f.chave for f in envelope.fatos_observados}
+        chaves_fatos |= {f.chave for f in envelope.fatos_inferidos}
+        if ChaveContexto.TIPO_ENTREGA not in chaves_fatos:
+            erros.append(
+                "nao pode avancar para fechamento sem tipo_entrega registrado"
+            )
+        if ChaveContexto.FORMA_PAGAMENTO not in chaves_fatos:
+            erros.append(
+                "nao pode avancar para fechamento sem forma_pagamento registrado"
+            )
+
+    # 8. Se tipo_entrega = entrega, fechamento exige endereco_entrega registrado
+    # Considera fatos ja no banco OU sendo registrados neste mesmo turno
+    if envelope.etapa_atual == EtapaFluxo.fechamento:
+        chaves_fatos = {f.chave for f in contexto.fatos_ativos}
+        chaves_fatos |= {f.chave for f in envelope.fatos_observados}
+        chaves_fatos |= {f.chave for f in envelope.fatos_inferidos}
+        # valor de tipo_entrega: verifica no banco primeiro, depois no envelope atual
+        tipo_entrega_valor = None
+        te_db = next((f for f in contexto.fatos_ativos if f.chave == ChaveContexto.TIPO_ENTREGA), None)
+        if te_db:
+            tipo_entrega_valor = te_db.valor
+        else:
+            te_env = next(
+                (f for f in list(envelope.fatos_observados) + list(envelope.fatos_inferidos)
+                 if f.chave == ChaveContexto.TIPO_ENTREGA), None
+            )
+            if te_env:
+                tipo_entrega_valor = str(te_env.valor)
+        if (
+            tipo_entrega_valor == "entrega"
+            and ChaveContexto.ENDERECO_ENTREGA not in chaves_fatos
+        ):
+            erros.append(
+                "nao pode avancar para fechamento com tipo_entrega=entrega "
+                "sem endereco_entrega registrado"
+            )
+
+    # 10. Mensagem para o cliente nao pode ser vazia
     if not envelope.mensagem_cliente or not envelope.mensagem_cliente.strip():
         erros.append("mensagem_cliente vazia")
 

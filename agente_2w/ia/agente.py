@@ -6,7 +6,7 @@ import logging
 from openai import OpenAI, RateLimitError, APITimeoutError, APIConnectionError
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
-from agente_2w.config import OPENAI_API_KEY, OPENAI_MODEL
+from agente_2w.config import OPENAI_API_KEY, OPENAI_MODEL, MAX_TOOL_ROUNDS
 
 logger = logging.getLogger(__name__)
 
@@ -23,85 +23,9 @@ from agente_2w.tools.resolve_cliente import resolver_cliente
 
 _client = OpenAI(api_key=OPENAI_API_KEY, timeout=OPENAI_TIMEOUT)
 
-# ---------- Definição das tools para function calling ----------
-
-TOOLS_SCHEMA = [
-    {
-        "type": "function",
-        "function": {
-            "name": "buscar_pneus",
-            "description": "Busca pneus no catálogo por dimensões, texto de medida ou marca/modelo.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "largura": {"type": "integer", "description": "Largura em mm (ex: 100, 110)"},
-                    "perfil": {"type": "integer", "description": "Altura do perfil (ex: 80, 90)"},
-                    "aro": {"type": "integer", "description": "Diâmetro do aro em polegadas (ex: 17, 18)"},
-                    "medida_texto": {"type": "string", "description": "Trecho da medida (ex: '100/80', '110/80-18')"},
-                    "marca_modelo": {"type": "string", "description": "Nome da marca ou modelo (ex: 'Pirelli', 'Pilot Street')"},
-                },
-                "required": [],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "buscar_pneus_por_moto",
-            "description": "Busca pneus compatíveis com uma moto pelo nome/modelo.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "termo_moto": {"type": "string", "description": "Nome ou modelo da moto (ex: 'CG 160', 'Biz 125')"},
-                },
-                "required": ["termo_moto"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "buscar_detalhes_pneu",
-            "description": "Busca detalhes completos de um pneu específico pelo UUID.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "pneu_id": {"type": "string", "description": "UUID do pneu"},
-                },
-                "required": ["pneu_id"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "consultar_estoque",
-            "description": "Consulta disponibilidade e preço de um pneu específico pelo UUID.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "pneu_id": {"type": "string", "description": "UUID do pneu"},
-                },
-                "required": ["pneu_id"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "resolver_cliente",
-            "description": "Busca um cliente pelo telefone. Se não existir, cria um novo.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "telefone": {"type": "string", "description": "Telefone do cliente (ex: '11999998888')"},
-                    "nome": {"type": "string", "description": "Nome do cliente (opcional)"},
-                },
-                "required": ["telefone"],
-            },
-        },
-    },
-]
+from agente_2w.ia.schemas_envelope import ENVELOPE_IA_SCHEMA as _ENVELOPE_IA_SCHEMA
+from agente_2w.ia.tools_schema import TOOLS_SCHEMA, TOOLS_COM_PNEU as _TOOLS_COM_PNEU
+from agente_2w.ia.extracao_pneus import extrair_pneus_de_resultado as _extrair_pneus_de_resultado
 
 # ---------- Mapa de dispatch das tools ----------
 
@@ -112,8 +36,6 @@ _TOOL_DISPATCH: dict = {
     "consultar_estoque": consultar_estoque,
     "resolver_cliente": resolver_cliente,
 }
-
-MAX_TOOL_ROUNDS = 5
 
 _RETRY_EXCEPTIONS = (RateLimitError, APITimeoutError, APIConnectionError)
 
@@ -136,97 +58,41 @@ def _chamar_openai(messages: list, tools=None) -> object:
         "model": OPENAI_MODEL,
         "messages": messages,
         "temperature": 0.3,
-        "response_format": {"type": "json_object"},
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "EnvelopeIA",
+                "strict": True,
+                "schema": _ENVELOPE_IA_SCHEMA,
+            },
+        },
     }
     if tools:
         kwargs["tools"] = tools
         kwargs["tool_choice"] = "auto"
+        kwargs["parallel_tool_calls"] = False  # obrigatorio com structured outputs
     return _client.chat.completions.create(**kwargs)
 
 
-def _executar_tool(nome: str, argumentos: dict) -> str:
+def _executar_tool(nome: str, argumentos: dict, dispatch: dict | None = None) -> str:
     """Executa uma tool pelo nome e retorna o resultado serializado."""
-    fn = _TOOL_DISPATCH.get(nome)
+    fn = (dispatch or _TOOL_DISPATCH).get(nome)
     if fn is None:
         return json.dumps({"erro": f"Tool '{nome}' não encontrada."})
     resultado = fn(**argumentos)
     return json.dumps(resultado, ensure_ascii=False, default=str)
 
 
-# ---------- Extração de pneu_ids dos resultados de tools ----------
-
-_TOOLS_COM_PNEU = {"buscar_pneus", "buscar_pneus_por_moto", "buscar_detalhes_pneu", "consultar_estoque"}
-
-
-def _extrair_pneus_de_resultado(resultado_json: str) -> list[dict]:
-    """Extrai pneu_ids dos resultados de tools de busca.
-
-    Suporta todas as estruturas de retorno das tools:
-    - buscar_pneus: {"pneus": [{"pneu_id": ...}]}
-    - buscar_pneus_por_moto: {"compatibilidades": [{"pneu_id": ...}]}
-    - consultar_estoque: {"pneu": {"id": ...}, "preco_venda": ...}
-    - buscar_detalhes_pneu: {"pneu": {"id": ...}}
-
-    Retorna lista de dicts com pneu_id, posicao e preco_venda quando disponiveis.
-    """
-    try:
-        data = json.loads(resultado_json)
-    except (json.JSONDecodeError, TypeError):
-        return []
-
-    pneus: list[dict] = []
-    vistos: set = set()
-
-    def _adicionar(pid: str, posicao=None, preco=None) -> None:
-        if pid and pid not in vistos:
-            vistos.add(pid)
-            pneus.append({"pneu_id": pid, "posicao": posicao, "preco_venda": preco})
-
-    def _extrair_item(item: dict, preco_contexto=None) -> None:
-        pid = item.get("pneu_id")
-        if pid:
-            _adicionar(
-                str(pid),
-                posicao=item.get("posicao") or item.get("pneu_tipo"),
-                preco=item.get("preco_venda") or preco_contexto,
-            )
-
-    if isinstance(data, list):
-        for item in data:
-            if isinstance(item, dict):
-                _extrair_item(item)
-    elif isinstance(data, dict):
-        # Sub-listas: "pneus" (buscar_pneus) e "compatibilidades" (buscar_pneus_por_moto)
-        for key in ("pneus", "compatibilidades"):
-            sub = data.get(key)
-            if isinstance(sub, list):
-                for item in sub:
-                    if isinstance(item, dict):
-                        _extrair_item(item)
-
-        # Nivel raiz: pneu_id direto
-        _extrair_item(data)
-
-        # Sub-dict "pneu" (consultar_estoque, buscar_detalhes_pneu):
-        # essas tools retornam pneu["id"] em vez de pneu_id no topo
-        pneu_sub = data.get("pneu")
-        if isinstance(pneu_sub, dict):
-            pid = pneu_sub.get("id")
-            if pid:
-                _adicionar(
-                    str(pid),
-                    posicao=pneu_sub.get("tipo") or data.get("posicao"),
-                    preco=data.get("preco_venda"),
-                )
-
-    return pneus
-
-
 def chamar_agente(
     contexto: ContextoExecutavel,
     mensagem_usuario: str,
+    imagens: list[str] | None = None,
 ) -> tuple[str, list[dict]]:
     """Envia mensagem do usuário + contexto para o modelo e processa tool calls.
+
+    Args:
+        imagens: lista de URLs de imagens enviadas pelo cliente (opcional).
+                 Quando presente, o content do usuário vira array multimodal.
 
     Retorna tupla:
         - texto bruto da resposta final do modelo (JSON do EnvelopeIA)
@@ -234,16 +100,36 @@ def chamar_agente(
     """
     contexto_json = contexto.model_dump_json(indent=None)
 
+    # Monta content do usuário: string simples ou array multimodal (com imagens)
+    if imagens:
+        user_content: list[dict] | str = [{"type": "text", "text": mensagem_usuario or "(sem texto)"}]
+        for url in imagens:
+            user_content.append({
+                "type": "image_url",
+                "image_url": {"url": url, "detail": "auto"},
+            })
+    else:
+        user_content = mensagem_usuario
+
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {
             "role": "system",
             "content": f"CONTEXTO ATUAL DA SESSÃO (JSON):\n{contexto_json}",
         },
-        {"role": "user", "content": mensagem_usuario},
+        {"role": "user", "content": user_content},
     ]
 
     pneus_encontrados: list[dict] = []
+
+    # Injeta sessao_id em buscar_pneus_por_moto para auditoria do web search interno
+    sessao_id = contexto.sessao.sessao_id
+    dispatch = {
+        **_TOOL_DISPATCH,
+        "buscar_pneus_por_moto": lambda termo_moto, posicao=None: buscar_pneus_por_moto(
+            termo_moto=termo_moto, posicao=posicao, sessao_id=sessao_id
+        ),
+    }
 
     for round_num in range(MAX_TOOL_ROUNDS):
         response = _chamar_openai(messages, tools=TOOLS_SCHEMA)
@@ -259,7 +145,7 @@ def chamar_agente(
         for tool_call in choice.message.tool_calls:
             args = json.loads(tool_call.function.arguments)
             logger.debug("Tool call: %s(%s)", tool_call.function.name, args)
-            resultado = _executar_tool(tool_call.function.name, args)
+            resultado = _executar_tool(tool_call.function.name, args, dispatch=dispatch)
             messages.append({
                 "role": "tool",
                 "tool_call_id": tool_call.id,

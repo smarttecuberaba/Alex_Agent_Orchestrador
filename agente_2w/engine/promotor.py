@@ -16,6 +16,7 @@ from agente_2w.db import (
     catalogo_repo,
     cliente_repo,
     pedido_repo,
+    log_demanda_pneu_repo,
 )
 from agente_2w.db.client import supabase
 from agente_2w.enums.enums import (
@@ -59,8 +60,8 @@ def _atualizar_stats_cliente(cliente_id, valor_pedido: Decimal) -> None:
             "Stats cliente %s atualizados: pedidos=%d, total=%.2f, segmento=%s",
             cliente_id, novo_total_pedidos, novo_valor_total, novo_segmento,
         )
-    except Exception as e:
-        logger.warning("Falha ao atualizar stats do cliente %s: %s", cliente_id, e)
+    except Exception:
+        logger.exception("Falha ao atualizar stats do cliente %s", cliente_id)
 
 
 def _normalizar(valor: str) -> str:
@@ -99,8 +100,8 @@ def cancelar_pedido_sessao(sessao_id: UUID) -> bool:
         for item in itens:
             catalogo_repo.decrementar_reservado(item.pneu_id, item.quantidade)
         logger.info("Estoque liberado: %d itens do pedido %s", len(itens), pedido.id)
-    except Exception as e:
-        logger.warning("Falha ao liberar estoque do pedido %s: %s", pedido.id, e)
+    except Exception:
+        logger.exception("Falha ao liberar estoque do pedido %s", pedido.id)
 
     # Reverter stats do cliente
     try:
@@ -118,8 +119,8 @@ def cancelar_pedido_sessao(sessao_id: UUID) -> bool:
                 "Stats cliente revertidos: pedidos=%d, valor=%.2f, segmento=%s",
                 novo_total, novo_valor, novo_segmento,
             )
-    except Exception as e:
-        logger.warning("Falha ao reverter stats do cliente: %s", e)
+    except Exception:
+        logger.exception("Falha ao reverter stats do cliente")
 
     return True
 
@@ -175,8 +176,8 @@ def alterar_pedido_sessao(sessao_id: UUID) -> bool:
         pedido_repo.atualizar_pedido(pedido.id, campos)
         logger.info("Pedido %s alterado: %s", pedido.id, list(campos.keys()))
         return True
-    except Exception as e:
-        logger.warning("Falha ao alterar pedido %s: %s", pedido.id, e)
+    except Exception:
+        logger.exception("Falha ao alterar pedido %s", pedido.id)
         return False
 
 
@@ -220,11 +221,14 @@ def validar_pre_condicoes(sessao_id: UUID) -> list[str]:
     elif _normalizar(fato_pagamento.valor_texto) == FormaPagamento.a_confirmar.value:
         erros.append("forma_pagamento ainda e a_confirmar")
 
-    # 6. Endereco se entrega
+    # 6. Endereco se entrega + cobertura de frete
     if fato_entrega and fato_entrega.valor_texto == TipoEntrega.entrega.value:
         fato_endereco = contexto_repo.buscar_fato_ativo(sessao_id, ChaveContexto.ENDERECO_ENTREGA)
         if not fato_endereco:
             erros.append("tipo_entrega e entrega mas endereco nao definido")
+        fato_nao_coberto = contexto_repo.buscar_fato_ativo(sessao_id, ChaveContexto.FRETE_NAO_COBERTO)
+        if fato_nao_coberto:
+            erros.append(f"municipio '{fato_nao_coberto.valor_texto}' nao tem cobertura de entrega")
 
     # 7. Estoque suficiente e preco definido
     for item in itens_validados:
@@ -286,13 +290,26 @@ def promover_para_pedido(sessao_id: UUID) -> Pedido:
         if i.status_item in _STATUS_PROMOVIVEL and i.pneu_id is not None
     ]
 
+    # Valor do frete (apenas para entregas)
+    valor_frete = Decimal("0")
+    if tipo_entrega == TipoEntrega.entrega:
+        fato_frete = contexto_repo.buscar_fato_ativo(sessao_id, ChaveContexto.FRETE_VALOR)
+        if fato_frete and fato_frete.valor_texto:
+            try:
+                valor_frete = Decimal(fato_frete.valor_texto)
+            except (ValueError, ArithmeticError):
+                logger.warning(
+                    "valor_frete invalido em fato FRETE_VALOR: '%s'",
+                    fato_frete.valor_texto,
+                )
+
     # Montar payload de itens e calcular valor total
-    valor_total = Decimal("0")
+    valor_itens = Decimal("0")
     itens_payload = []
     for item in itens_validados:
         preco = item.preco_unitario_sugerido
         subtotal = preco * item.quantidade
-        valor_total += subtotal
+        valor_itens += subtotal
         itens_payload.append({
             "pneu_id": str(item.pneu_id),
             "quantidade": item.quantidade,
@@ -302,10 +319,12 @@ def promover_para_pedido(sessao_id: UUID) -> Pedido:
             "posicao": item.posicao.value if item.posicao else None,
         })
 
+    valor_total = valor_itens + valor_frete
+
     # Chamar RPC transacional
     logger.info(
-        "Chamando RPC promover_para_pedido: sessao=%s, itens=%d, valor=%s",
-        sessao_id, len(itens_payload), valor_total,
+        "Chamando RPC promover_para_pedido: sessao=%s, itens=%d, valor_itens=%s, frete=%s, total=%s",
+        sessao_id, len(itens_payload), valor_itens, valor_frete, valor_total,
     )
 
     resultado = supabase.rpc("promover_para_pedido", {
@@ -314,6 +333,7 @@ def promover_para_pedido(sessao_id: UUID) -> Pedido:
         "p_tipo_entrega": tipo_entrega.value,
         "p_forma_pagamento": forma_pagamento.value,
         "p_valor_total": str(valor_total),
+        "p_valor_frete": str(valor_frete),
         "p_endereco_json": endereco_json,
         "p_itens": itens_payload,
     }).execute()
@@ -336,8 +356,8 @@ def promover_para_pedido(sessao_id: UUID) -> Pedido:
                 UUID(item_payload["pneu_id"]),
                 item_payload["quantidade"],
             )
-        except Exception as e:
-            logger.warning("Falha ao reservar estoque pneu %s: %s", item_payload["pneu_id"], e)
+        except Exception:
+            logger.exception("Falha ao reservar estoque pneu %s", item_payload["pneu_id"])
 
     # Atualizar inteligencia de negocio do cliente
     _atualizar_stats_cliente(sessao.cliente_id, valor_total)
@@ -346,5 +366,8 @@ def promover_para_pedido(sessao_id: UUID) -> Pedido:
     pedido = pedido_repo.buscar_pedido_por_id(UUID(pedido_id))
     if pedido is None:
         raise ValueError(f"Pedido {pedido_id} criado pela RPC mas nao encontrado")
+
+    # Marcar buscas da sessão como convertidas em pedido (analytics)
+    log_demanda_pneu_repo.marcar_converteu_pedido(sessao_id, pedido.id)
 
     return pedido

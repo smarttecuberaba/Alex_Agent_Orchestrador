@@ -18,13 +18,13 @@ class ParseError(Exception):
 
 
 def _extrair_json(texto: str) -> str:
-    """Extrai o primeiro bloco JSON do texto, mesmo com markdown ao redor."""
-    # Tenta bloco ```json ... ```
-    match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", texto, re.DOTALL)
-    if match:
-        return match.group(1)
+    """Extrai o primeiro bloco JSON do texto, mesmo com markdown ao redor.
 
-    # Tenta encontrar o primeiro { ... } balanceado
+    Usa bracket counting (balanceamento de chaves) como metodo principal —
+    garante extracao correta de JSON aninhado. Regex non-greedy era usado
+    antes mas truncava objetos com sub-objetos (ex: {"a": {"b": 1}}).
+    """
+    # Metodo principal: encontrar o primeiro { ... } balanceado
     inicio = texto.find("{")
     if inicio == -1:
         return texto
@@ -38,6 +38,7 @@ def _extrair_json(texto: str) -> str:
             if nivel == 0:
                 return texto[inicio : i + 1]
 
+    # Se nao fechou (JSON truncado), retorna do inicio ate o fim
     return texto[inicio:]
 
 

@@ -35,7 +35,7 @@ def buscar_pneus_por_dimensoes(
     aro: int | None = None,
 ) -> list[dict]:
     try:
-        query = supabase.table("catalogo_agente").select("*")
+        query = supabase.table("catalogo_agente").select("*").gt("disponivel_real", 0)
         if largura is not None:
             query = query.eq("largura", largura)
         if perfil is not None:
@@ -54,6 +54,7 @@ def buscar_pneus_por_medida_texto(medida: str) -> list[dict]:
             supabase.table("catalogo_agente")
             .select("*")
             .ilike("medida", f"%{medida}%")
+            .gt("disponivel_real", 0)
             .execute()
         )
         return resultado.data
@@ -139,6 +140,22 @@ def buscar_compatibilidade_por_moto_texto(termo: str) -> list[dict]:
     for moto in motos:
         compat = buscar_compatibilidade_por_moto(UUID(moto["id"]))
         resultados.extend(compat)
+
+    # Enriquecer com info de estoque para evitar sugerir pneus sem disponibilidade
+    pneu_ids = list({r["pneu_id"] for r in resultados if r.get("pneu_id")})
+    estoque_map: dict[str, bool] = {}
+    for pid in pneu_ids:
+        estoque = buscar_estoque_por_pneu(UUID(pid))
+        if estoque:
+            disponivel = estoque.quantidade_disponivel - estoque.reservado
+            estoque_map[pid] = disponivel > 0
+        else:
+            estoque_map[pid] = False
+
+    for r in resultados:
+        pid = r.get("pneu_id")
+        r["em_estoque"] = estoque_map.get(pid, False)
+
     return resultados
 
 
@@ -168,8 +185,8 @@ def incrementar_reservado(pneu_id: UUID, quantidade: int) -> None:
             "p_delta": quantidade,
         }).execute()
         logger.debug("Reservado +%d para pneu %s", quantidade, pneu_id)
-    except Exception as e:
-        logger.warning("Falha ao incrementar reservado pneu %s: %s", pneu_id, e)
+    except Exception:
+        logger.exception("Falha ao incrementar reservado pneu %s", pneu_id)
 
 
 def decrementar_reservado(pneu_id: UUID, quantidade: int) -> None:
@@ -180,5 +197,5 @@ def decrementar_reservado(pneu_id: UUID, quantidade: int) -> None:
             "p_delta": -quantidade,
         }).execute()
         logger.debug("Reservado -%d para pneu %s", quantidade, pneu_id)
-    except Exception as e:
-        logger.warning("Falha ao decrementar reservado pneu %s: %s", pneu_id, e)
+    except Exception:
+        logger.exception("Falha ao decrementar reservado pneu %s", pneu_id)

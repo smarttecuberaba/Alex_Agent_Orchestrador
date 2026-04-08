@@ -13,6 +13,7 @@ class PedidoBase(BaseModel):
     tipo_entrega: TipoEntrega
     forma_pagamento: FormaPagamento
     valor_total: Decimal
+    valor_frete: Decimal = Decimal("0")
     status_pedido: StatusPedido
     endereco_entrega_json: Optional[dict[str, Any]] = None
 
@@ -46,6 +47,7 @@ class PedidoCreate(PedidoBase):
 
 class Pedido(PedidoBase):
     id: UUID
+    numero_pedido: int
     criado_em: datetime
     atualizado_em: datetime
 

@@ -91,7 +91,13 @@ def main():
 
         try:
             resposta = processar_turno(sessao_id, mensagem)
-            print(f"\n2W Pneus: {resposta}\n")
+            if resposta.fotos:
+                print(f"\n2W Pneus: {resposta}")
+                for foto in resposta.fotos:
+                    print(f"  [foto: {foto}]")
+                print()
+            else:
+                print(f"\n2W Pneus: {resposta}\n")
         except Exception as e:
             print(f"\n[ERRO] {e}\n")
 

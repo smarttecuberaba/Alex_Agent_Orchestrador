@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timezone
 from uuid import UUID
 
 from agente_2w.db.client import supabase
@@ -78,9 +79,14 @@ def atualizar_status_item(
     status: StatusItemProvisorio,
 ) -> ItemProvisorio:
     try:
+        payload: dict = {"status_item": status.value}
+        if status == StatusItemProvisorio.selecionado_cliente:
+            payload["cliente_confirmou_em"] = datetime.now(timezone.utc).isoformat()
+        elif status == StatusItemProvisorio.validado:
+            payload["validado_backend_em"] = datetime.now(timezone.utc).isoformat()
         resultado = (
             supabase.table(_TABELA)
-            .update({"status_item": status.value})
+            .update(payload)
             .eq("id", str(item_id))
             .execute()
         )

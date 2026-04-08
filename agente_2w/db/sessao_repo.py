@@ -113,6 +113,14 @@ def atualizar_status(
         raise ErroDeAtualizacao(_TABELA, f"status {sessao_id}: {e}") from e
 
 
+def fechar_sessao(sessao_id: UUID) -> SessaoChat:
+    """Fecha a sessao (sem pedido — apenas encerramento administrativo).
+
+    Para fechamento via pedido confirmado, use a RPC promover_para_pedido.
+    """
+    return atualizar_status(sessao_id, StatusSessao.fechada)
+
+
 def vincular_cliente(sessao_id: UUID, cliente_id: UUID) -> SessaoChat:
     try:
         resultado = (

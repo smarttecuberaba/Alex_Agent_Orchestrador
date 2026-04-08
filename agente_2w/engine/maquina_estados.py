@@ -15,12 +15,17 @@ TRANSICOES_PERMITIDAS: dict[EtapaFluxo, list[EtapaFluxo]] = {
     EtapaFluxo.confirmacao_item: [
         EtapaFluxo.entrega_pagamento,
         EtapaFluxo.oferta,
+        EtapaFluxo.busca,        # adicionar_outro_item: volta pra busca sem perder itens
     ],
     EtapaFluxo.entrega_pagamento: [
         EtapaFluxo.fechamento,
         EtapaFluxo.confirmacao_item,
+        EtapaFluxo.busca,        # adicionar_outro_item: cliente lembrou de mais um pneu
     ],
-    EtapaFluxo.fechamento: [],
+    EtapaFluxo.fechamento: [
+        EtapaFluxo.oferta,          # erro_promocao (estoque=0): voltar para oferecer alternativa
+        EtapaFluxo.busca,           # erro_promocao: buscar outro pneu
+    ],
 }
 
 

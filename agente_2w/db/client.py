@@ -10,14 +10,12 @@ logger = logging.getLogger(__name__)
 
 
 def _detectar_proxy() -> str | None:
-    """Detecta proxy via env vars ou Windows Registry (apenas Windows)."""
+    """Detecta proxy via env vars ou Windows Registry (apenas no Windows)."""
     proxy = os.getenv("HTTPS_PROXY") or os.getenv("HTTP_PROXY")
     if proxy:
         logger.debug("Proxy detectado via env: %s", proxy)
         return proxy
-
-    import platform
-    if platform.system() == "Windows":
+    if os.name == "nt":
         try:
             import winreg
             with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
@@ -31,7 +29,6 @@ def _detectar_proxy() -> str | None:
                         return proxy
         except Exception as e:
             logger.debug("Proxy Windows Registry nao disponivel: %s", e)
-
     return None
 
 

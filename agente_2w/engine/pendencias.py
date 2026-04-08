@@ -32,6 +32,8 @@ ACOES_POR_ETAPA: dict[EtapaFluxo, list[str]] = {
         "registrar_quantidade",
         "registrar_posicao",
         "rejeitar_item",
+        "adicionar_outro_item",  # cliente quer mais pneus — volta para busca
+        "finalizar_itens",       # cliente nao quer mais itens — avanca para entrega_pagamento
         "responder_incerteza_segura",
     ],
     EtapaFluxo.entrega_pagamento: [
@@ -40,11 +42,17 @@ ACOES_POR_ETAPA: dict[EtapaFluxo, list[str]] = {
         "perguntar_forma_pagamento",
         "registrar_entrega",
         "registrar_pagamento",
+        "adicionar_outro_item",  # cliente lembrou de outro pneu — volta para busca
         "responder_incerteza_segura",
     ],
     EtapaFluxo.fechamento: [
         "revisar_pedido",
         "converter_em_pedido",
+        "cancelar_pedido",
+        "buscar_por_moto",           # erro_promocao (estoque=0): buscar alternativa
+        "buscar_por_medida",         # erro_promocao (estoque=0): buscar por medida
+        "explicar_falta",            # informar indisponibilidade
+        "rejeitar_item",             # descartar item sem estoque
         "responder_incerteza_segura",
     ],
 }
@@ -59,7 +67,7 @@ PENDENCIAS_POR_ETAPA: dict[EtapaFluxo, list[dict]] = {
         {
             "codigo": "moto_ou_medida",
             "descricao": "cliente precisa informar moto ou medida do pneu",
-            "campo_relacionado": "moto_modelo_informado",
+            "campo_relacionado": ChaveContexto.MOTO_MODELO,
             "obrigatoria_para": "busca",
         },
     ],
@@ -67,7 +75,7 @@ PENDENCIAS_POR_ETAPA: dict[EtapaFluxo, list[dict]] = {
         {
             "codigo": "resultado_busca",
             "descricao": "busca precisa retornar pelo menos uma opcao real",
-            "campo_relacionado": "resultados_busca",
+            "campo_relacionado": ChaveContexto.ULTIMOS_PNEUS_ENCONTRADOS,
             "obrigatoria_para": "oferta",
         },
     ],
@@ -75,15 +83,15 @@ PENDENCIAS_POR_ETAPA: dict[EtapaFluxo, list[dict]] = {
         {
             "codigo": "escolha_cliente",
             "descricao": "cliente precisa escolher um pneu",
-            "campo_relacionado": "pneu_confirmado",
+            "campo_relacionado": ChaveContexto.ULTIMOS_PNEUS_ENCONTRADOS,
             "obrigatoria_para": "confirmacao_item",
         },
     ],
     EtapaFluxo.confirmacao_item: [
         {
             "codigo": "item_validado",
-            "descricao": "item provisorio precisa estar validado com pneu real",
-            "campo_relacionado": "item_provisorio",
+            "descricao": "pelo menos um item provisorio confirmado com pneu_id",
+            "campo_relacionado": ChaveContexto.ITENS_FINALIZADOS,
             "obrigatoria_para": "entrega_pagamento",
         },
     ],

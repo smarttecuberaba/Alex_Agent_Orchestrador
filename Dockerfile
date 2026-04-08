@@ -1,17 +1,12 @@
-FROM python:3.12-slim
+FROM python:3.11-slim
 
 WORKDIR /app
 
-# Instalar dependências do sistema
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copiar e instalar dependências Python
+# Dependencias primeiro (cache de layer do Docker)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copiar código da aplicação
+# Codigo do projeto
 COPY agente_2w/ ./agente_2w/
 COPY api/ ./api/
 COPY webhook.py .
@@ -25,3 +20,10 @@ HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
 
 # Iniciar servidor
 CMD ["uvicorn", "webhook:app", "--host", "0.0.0.0", "--port", "5001", "--workers", "1"]
+=======
+COPY webhook_server.py .
+
+EXPOSE 8000
+
+CMD ["uvicorn", "webhook_server:app", "--host", "0.0.0.0", "--port", "8000", "--timeout-keep-alive", "65"]
+>>>>>>> d4dbf89 (Adiciona pasta nova agente)

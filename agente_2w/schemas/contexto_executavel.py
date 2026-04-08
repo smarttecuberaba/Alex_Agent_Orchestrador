@@ -107,11 +107,39 @@ class Pendencia(BaseModel):
     obrigatoria_para: str
 
 
+class FreteContexto(BaseModel):
+    municipio: str
+    coberto: bool
+    valor_frete: Optional[Decimal] = None
+    bairro: Optional[str] = None
+
+
 class ResumoOperacional(BaseModel):
     tem_item_validado: bool = False
     tem_entrega_definida: bool = False
     tem_pagamento_definido: bool = False
     pode_avancar_etapa: bool = False
+
+
+class ItemPedidoSessaoContexto(BaseModel):
+    pneu_nome: str
+    posicao: Optional[str] = None
+    quantidade: int
+    preco_unitario: Decimal
+
+
+class PedidoSessaoContexto(BaseModel):
+    """Pedido confirmado criado nesta sessão (se já existir)."""
+    pedido_id: str
+    numero_pedido: int
+    status_pedido: str
+    valor_total: Decimal
+    valor_frete: Decimal
+    forma_pagamento: str
+    tipo_entrega: str
+    endereco_entrega_json: Optional[dict] = None
+    itens: list[ItemPedidoSessaoContexto] = Field(default_factory=list)
+    criado_em: datetime
 
 
 class Metadados(BaseModel):
@@ -130,4 +158,9 @@ class ContextoExecutavel(BaseModel):
     pendencias: list[Pendencia] = Field(default_factory=list)
     acoes_permitidas: list[str] = Field(default_factory=list)
     resumo_operacional: ResumoOperacional = Field(default_factory=ResumoOperacional)
+    frete: Optional[FreteContexto] = None
+    tabela_fretes: list[dict] = Field(default_factory=list)
+    config_loja: dict[str, str] = Field(default_factory=dict)
+    alertas: list[str] = Field(default_factory=list)
+    pedido_sessao_atual: Optional[PedidoSessaoContexto] = None
     metadados: Metadados
