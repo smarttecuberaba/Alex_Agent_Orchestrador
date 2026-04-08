@@ -20,10 +20,14 @@ HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
 
 # Iniciar servidor
 CMD ["uvicorn", "webhook:app", "--host", "0.0.0.0", "--port", "5001", "--workers", "1"]
-=======
+
 COPY webhook_server.py .
 
 EXPOSE 5001
 
 CMD ["uvicorn", "webhook_server:app", "--host", "0.0.0.0", "--port", "5001", "--timeout-keep-alive", "65"]
->>>>>>> d4dbf89 (Adiciona pasta nova agente)
+
+
+
+
+
