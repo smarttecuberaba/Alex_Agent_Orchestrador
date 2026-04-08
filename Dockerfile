@@ -23,7 +23,7 @@ CMD ["uvicorn", "webhook:app", "--host", "0.0.0.0", "--port", "5001", "--workers
 =======
 COPY webhook_server.py .
 
-EXPOSE 8000
+EXPOSE 5001
 
-CMD ["uvicorn", "webhook_server:app", "--host", "0.0.0.0", "--port", "8000", "--timeout-keep-alive", "65"]
+CMD ["uvicorn", "webhook_server:app", "--host", "0.0.0.0", "--port", "5001", "--timeout-keep-alive", "65"]
 >>>>>>> d4dbf89 (Adiciona pasta nova agente)
